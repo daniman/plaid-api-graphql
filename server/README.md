@@ -2,15 +2,9 @@
 
 To run this application locally, first install it and then run either of the flows described below. Additionally, please also refer to the [Quickstart guide](https://plaid.com/docs/quickstart).
 
-## Installing the quickstart app
-``` bash
-git clone https://github.com/plaid/quickstart.git
-cd quickstart/node
+```bash
 npm install
-```
 
-## The canonical flow
-``` bash
 # Start the Quickstart with your API keys from the Dashboard
 # https://dashboard.plaid.com/account/keys
 #
@@ -21,18 +15,17 @@ npm install
 # PLAID_COUNTRY_CODES is a comma-separated list of countries to use when
 # initializing Link, see plaid.com/docs/faq/#does-plaid-support-international-bank-accounts-
 # for a complete list
-
-PLAID_CLIENT_ID='CLIENT_ID' \
-PLAID_SECRET='SECRET' \
-PLAID_ENV='sandbox' \
-PLAID_PRODUCTS='transactions' \
-PLAID_COUNTRY_CODES='US' \
-node index.js
-
-# Go to http://localhost:8000
+APP_PORT=8000 \
+PLAID_CLIENT_ID=5f66da6013826c0013ee6966 \
+PLAID_SECRET=c2b07856b702f9da189bb16a4d4d4f \
+PLAID_PRODUCTS=transactions \
+PLAID_COUNTRY_CODES=US \
+PLAID_ENV=sandbox \
+npx nodemon index.ts --exec ts-node
 ```
 
 ### Link token creation and server-side configuration.
+
 The [recommended way to initialize Plaid Link](https://plaid.com/docs/#create-link-token) is to pass Plaid Link initialization
 parameters server-side to `link/token/create`. The server then returns the link token,
 which the client can then use to initialize Plaid Link.
@@ -42,10 +35,11 @@ initialization parameters associated with the Plaid Token will be applied.
 Note - If you want to use the [Payment Initiation][payment-initiation] product, you will need to [contact Sales][contact-sales] to get this product enabled.
 
 ## The OAuth redirect flow
+
 Some European institutions require an OAuth redirect authentication flow, where the end user is redirected to the bank’s website or mobile app to authenticate. For this flow, you should provide an additional configuration parameter, `PLAID_REDIRECT_URI`. You will also need to make sure that you register
 this `PLAID_REDIRECT_URI` in the [Plaid dashboard][dashboard-api-section].
 
-``` bash
+```bash
 # You will need to configure the PLAID_REDIRECT_URI for
 # your client ID through the Plaid developer dashboard at
 # https://dashboard.plaid.com/team/api.
