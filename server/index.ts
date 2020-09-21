@@ -1,48 +1,31 @@
-"use strict";
-
+const { ApolloServer, gql } = require("apollo-server");
 var util = require("util");
-
 var envvar = require("envvar");
-var express = require("express");
+var path = require("path");
 var bodyParser = require("body-parser");
 var moment = require("moment");
 var plaid = require("plaid");
 
-var APP_PORT = envvar.number("APP_PORT", 8000);
-var PLAID_CLIENT_ID = envvar.string("PLAID_CLIENT_ID");
-var PLAID_SECRET = envvar.string("PLAID_SECRET");
-var PLAID_ENV = envvar.string("PLAID_ENV", "sandbox");
-// PLAID_PRODUCTS is a comma-separated list of products to use when initializing
-// Link. Note that this list must contain 'assets' in order for the app to be
-// able to create and retrieve asset reports.
-var PLAID_PRODUCTS = envvar.string("PLAID_PRODUCTS", "transactions").split(",");
+require("dotenv").config();
 
-// PLAID_PRODUCTS is a comma-separated list of countries for which users
-// will be able to select institutions from.
-var PLAID_COUNTRY_CODES = envvar.string("PLAID_COUNTRY_CODES", "US").split(",");
-
-// Parameters used for the OAuth redirect Link flow.
-//
-// Set PLAID_REDIRECT_URI to 'http://localhost:8000/oauth-response.html'
-// The OAuth redirect flow requires an endpoint on the developer's website
-// that the bank website should redirect to. You will need to configure
-// this redirect URI for your client ID through the Plaid developer dashboard
-// at https://dashboard.plaid.com/team/api.
-var PLAID_REDIRECT_URI = envvar.string("PLAID_REDIRECT_URI", "");
+var APP_PORT = process.env.APP_PORT;
+var PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID;
+var PLAID_SECRET = process.env.PLAID_SECRET;
+var PLAID_ENV = process.env.PLAID_ENV;
+var PLAID_PRODUCTS = process.env.PLAID_PRODUCTS.split(",");
+var PLAID_COUNTRY_CODES = process.env.PLAID_COUNTRY_CODES.split(",");
+var PLAID_REDIRECT_URI = process.env.PLAID_REDIRECT_URI;
 
 // We store the access_token in memory - in production, store it in a secure
 // persistent data store
 var ACCESS_TOKEN = null;
+
 var PUBLIC_TOKEN = null;
 var ITEM_ID = null;
 // The payment_id is only relevant for the UK Payment Initiation product.
 // We store the payment_id in memory - in production, store it in a secure
 // persistent data store
 var PAYMENT_ID = null;
-
-var prettyPrintResponse = (response) => {
-  console.log(util.inspect(response, { colors: true, depth: 4 }));
-};
 
 // Initialize the Plaid client
 // Find your API keys in the Dashboard (https://dashboard.plaid.com/account/keys)
@@ -55,127 +38,156 @@ var client = new plaid.Client({
   },
 });
 
-const { ApolloServer, gql } = require("apollo-server");
-
 const typeDefs = gql`
-  type Book {
-    title: String
-    author: String
+  type Transaction {
+    account: Account
+    name: String
+    merchantName: String
+    amount: Float
+    date: String
+    pending: Boolean
+    categoryId: String
+    accountOwner: String
+    paymentChannel: String
+    transactionCode: Int
+    transactionId: ID
+    transactionType: String
+    isoCurrencyCode: String
+    pendingTransactionId: ID
+    unofficialCurrencyCode: String
+    authorizedDate: String
+    category: [String]
+    # location: [Object],
+    # payment_meta: [Object],
+  }
+
+  type Balances {
+    available: Float
+    current: Float
+    isoCurrencyCode: String
+    limit: Float
+    unofficialCurrencyCode: String
+  }
+
+  type Account {
+    id: ID
+    mask: String
+    name: String
+    officialName: String
+    subtype: String
+    type: String
+    balances: Balances
+  }
+
+  type LinkToken {
+    token: String!
+    expiration: String!
   }
 
   type Query {
-    books: [Book]
-    createLinkToken: String!
-    getToken(publicToken: String!): String!
+    transactions(accessToken: String): [Transaction]
+  }
+
+  type Mutation {
+    getLinkToken: LinkToken
+    getAccessToken(publicToken: String!): Boolean
   }
 `;
 
-const books = [
-  {
-    title: "Harry Potter and the Chamber of Secrets",
-    author: "J.K. Rowling",
-  },
-  {
-    title: "Jurassic Park",
-    author: "Michael Crichton",
-  },
-];
+const toCamel = (s) => {
+  return s.replace(/([-_][a-z])/gi, ($1) => {
+    return $1.toUpperCase().replace("-", "").replace("_", "");
+  });
+};
+
+const snakeToCamel = (object) => {
+  const newObj = {};
+  Object.entries(object).forEach(([key, value]) => {
+    newObj[toCamel(key)] =
+      !!value && typeof value === "object" && !(value instanceof Array)
+        ? snakeToCamel(value)
+        : value;
+  });
+  return newObj;
+};
 
 // Resolvers define the technique for fetching the types defined in the
 // schema. This resolver retrieves books from the "books" array above.
 const resolvers = {
-  Query: {
-    getToken: (_context, args) => {
+  Mutation: {
+    getLinkToken: () =>
+      client
+        .createLinkToken({
+          user: {
+            client_user_id: "user-id", // a unique id for the current user.
+          },
+          client_name: "Plaid Quickstart",
+          products: PLAID_PRODUCTS,
+          country_codes: PLAID_COUNTRY_CODES,
+          language: "en",
+        })
+        .then((createTokenResponse) => ({
+          token: createTokenResponse.link_token,
+          expiration: createTokenResponse.expiration,
+        }))
+        .catch((err) => new Error(err)),
+    getAccessToken: (_context, args) =>
       // Exchange token flow - exchange a Link public_token for an API access_token
       // https://plaid.com/docs/#exchange-token-flow
-      client.exchangePublicToken(args.publicToken, function (
-        error,
-        tokenResponse
-      ) {
-        console.log(tokenResponse);
-        if (error) prettyPrintResponse(error);
+      client
+        .exchangePublicToken(args.publicToken)
+        .then((tokenResponse) => {
+          ACCESS_TOKEN = tokenResponse.access_token;
+          ITEM_ID = tokenResponse.item_id;
 
-        ACCESS_TOKEN = tokenResponse.access_token;
-        ITEM_ID = tokenResponse.item_id;
-        prettyPrintResponse(tokenResponse);
-      });
+          console.log("ACCESS_TOKEN", ACCESS_TOKEN);
+          return tokenResponse.status_code === 200;
+        })
+        .catch((err) => new Error(err)),
+  },
+  Query: {
+    transactions: (_context, args) =>
+      client
+        .getTransactions(
+          args.accessToken || ACCESS_TOKEN,
+          moment().subtract(30, "days").format("YYYY-MM-DD"),
+          moment().format("YYYY-MM-DD"),
+          {
+            count: 250,
+            offset: 0,
+          }
+        )
+        .then((response) => {
+          return response.transactions.map((res) => {
+            const account =
+              response.accounts.find((a) => a.account_id === res.account_id) ||
+              {};
 
-      return "hello";
-    },
-    createLinkToken: () => {
-      // Create a link token with configs which we can then use to initialize Plaid Link client-side.
-      // See https://plaid.com/docs/#create-link-token
-      const configs = {
-        user: {
-          // This should correspond to a unique id for the current user.
-          client_user_id: "user-id",
-        },
-        client_name: "Plaid Quickstart",
-        products: PLAID_PRODUCTS,
-        country_codes: PLAID_COUNTRY_CODES,
-        language: "en",
-      };
+            console.log(res.location, res.payment_meta);
 
-      // if (PLAID_REDIRECT_URI !== "") {
-      //   configs.redirect_uri = PLAID_REDIRECT_URI;
-      // }
-
-      client.createLinkToken(configs, function (error, createTokenResponse) {
-        if (error) prettyPrintResponse(error);
-
-        const {
-          expiration,
-          link_token,
-          request_id,
-          status_code,
-        } = createTokenResponse;
-        console.log(link_token);
-
-        console.log(createTokenResponse);
-      });
-    },
-    books: () => {
-      // Retrieve Transactions for an Item https://plaid.com/docs/#transactions
-      // Pull transactions for the Item for the last 30 days
-      var startDate = moment().subtract(30, "days").format("YYYY-MM-DD");
-      var endDate = moment().format("YYYY-MM-DD");
-      client.getTransactions(
-        ACCESS_TOKEN,
-        startDate,
-        endDate,
-        {
-          count: 250,
-          offset: 0,
-        },
-        function (error, transactionsResponse) {
-          if (error) prettyPrintResponse(error);
-
-          prettyPrintResponse(transactionsResponse);
-        }
-      );
-
-      return books;
-    },
+            return snakeToCamel({
+              ...res,
+              account: {
+                ...account,
+                id: account.account_id,
+              },
+            });
+          });
+        })
+        .catch((err) => new Error(err)),
   },
 };
 
 // The ApolloServer constructor requires two parameters: your schema
 // definition and your set of resolvers.
-const server = new ApolloServer({ typeDefs, resolvers });
+const server = new ApolloServer({ typeDefs, resolvers, playground: false });
 
 // The `listen` method launches a web server.
 server.listen().then(({ url }) => {
   console.log(
-    `🚀  Server ready at ${url}\nQuery your server at https://studio-staging.apollographql.com/dev`
+    `🚀  Server ready at ${url}\nQuery at https://studio-staging.apollographql.com/dev`
   );
 });
-
-// var app = express();
-// app.use(express.static('public'));
-// app.use(bodyParser.urlencoded({
-//   extended: false
-// }));
-// app.use(bodyParser.json());
 
 // app.get('/', function(request, response, next) {
 //   response.sendFile('./views/index.html', { root: __dirname });
