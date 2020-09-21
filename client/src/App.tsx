@@ -1,10 +1,12 @@
 import React from "react";
-import { gql, useMutation } from "@apollo/client";
+import { gql, useApolloClient, useMutation } from "@apollo/client";
+import { Spending } from "./Spending";
+import * as Types from "./types";
 
 declare var Plaid: any;
 
 const GET_LINK_TOKEN = gql`
-  mutation getLinkToken {
+  mutation GetLinkToken {
     getLinkToken {
       token
     }
@@ -12,16 +14,17 @@ const GET_LINK_TOKEN = gql`
 `;
 
 const GET_ACCESS_TOKEN = gql`
-  mutation($publicToken: String!) {
+  mutation GetAccessToken($publicToken: String!) {
     getAccessToken(publicToken: $publicToken)
   }
 `;
 
 function App() {
+  const client = useApolloClient();
   const [
     getLinkToken,
     { data: linkTokenData, loading: linkTokenLoading, error: linkTokenError },
-  ] = useMutation(GET_LINK_TOKEN);
+  ] = useMutation<Types.GetLinkToken>(GET_LINK_TOKEN);
 
   const [
     getAccessToken,
@@ -30,7 +33,9 @@ function App() {
       loading: accessTokenLoading,
       error: accessTokenError,
     },
-  ] = useMutation(GET_ACCESS_TOKEN);
+  ] = useMutation<Types.GetAccessToken, Types.GetAccessTokenVariables>(
+    GET_ACCESS_TOKEN
+  );
 
   return (
     <div style={{ padding: 40 }}>
@@ -49,7 +54,9 @@ function App() {
             const configs = {
               token: linkToken,
               onSuccess: async (publicToken: string) => {
-                getAccessToken({ variables: { publicToken } });
+                getAccessToken({ variables: { publicToken } }).then((data) => {
+                  client.resetStore();
+                });
               },
               onExit: async function (err: any) {
                 if (err != null) {
@@ -97,6 +104,9 @@ function App() {
           {accessTokenError.message}
         </div>
       )}
+      <div style={{ marginTop: 20 }}>
+        <Spending />
+      </div>
     </div>
   );
 }

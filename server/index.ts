@@ -18,7 +18,7 @@ var PLAID_REDIRECT_URI = process.env.PLAID_REDIRECT_URI;
 
 // We store the access_token in memory - in production, store it in a secure
 // persistent data store
-var ACCESS_TOKEN = null;
+var ACCESS_TOKEN = "aaaa_FAKE_TOKEN_bbbb";
 
 var PUBLIC_TOKEN = null;
 var ITEM_ID = null;
@@ -40,18 +40,18 @@ var client = new plaid.Client({
 
 const typeDefs = gql`
   type Transaction {
+    id: ID!
+    code: String
+    type: String
     account: Account
     name: String
     merchantName: String
-    amount: Float
-    date: String
+    amount: Float!
+    date: String!
     pending: Boolean
     categoryId: String
     accountOwner: String
     paymentChannel: String
-    transactionCode: Int
-    transactionId: ID
-    transactionType: String
     isoCurrencyCode: String
     pendingTransactionId: ID
     unofficialCurrencyCode: String
@@ -85,7 +85,7 @@ const typeDefs = gql`
   }
 
   type Query {
-    transactions(accessToken: String): [Transaction]
+    transactions(accessToken: String): [Transaction!]
   }
 
   type Mutation {
@@ -140,7 +140,6 @@ const resolvers = {
           ACCESS_TOKEN = tokenResponse.access_token;
           ITEM_ID = tokenResponse.item_id;
 
-          console.log("ACCESS_TOKEN", ACCESS_TOKEN);
           return tokenResponse.status_code === 200;
         })
         .catch((err) => new Error(err)),
@@ -150,7 +149,7 @@ const resolvers = {
       client
         .getTransactions(
           args.accessToken || ACCESS_TOKEN,
-          moment().subtract(30, "days").format("YYYY-MM-DD"),
+          moment().subtract(60, "days").format("YYYY-MM-DD"),
           moment().format("YYYY-MM-DD"),
           {
             count: 250,
@@ -163,10 +162,11 @@ const resolvers = {
               response.accounts.find((a) => a.account_id === res.account_id) ||
               {};
 
-            console.log(res.location, res.payment_meta);
-
             return snakeToCamel({
               ...res,
+              id: res.transaction_id,
+              code: res.transaction_code,
+              type: res.transaction_type,
               account: {
                 ...account,
                 id: account.account_id,
